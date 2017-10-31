@@ -1,20 +1,22 @@
 PLATFORM=gcc
 include ../config/Makefile.in.$(PLATFORM)
+CC=$(NVCC)
+CFLAGS=$(NVCCFLAGS)
 
 # ===
 # Main driver and sample run
 
 lshallow: ldriver.o shallow2d.o stepper.o
-	$(CC) $(CFLAGS) $(LUA_CFLAGS) -o $@ $^ $(LUA_LIBS) $(LIBS)
+	$(CC) $(CFLAGS) $(LUA_CFLAGS) -o $@ $^ $(LUA_LIBS) $(LIBS) -pg
 
 ldriver.o: ldriver.c shallow2d.h
-	$(CC) $(CFLAGS) $(LUA_CFLAGS) -c $<
+	$(CC) $(CFLAGS) $(LUA_CFLAGS) -c $< -pg
 
-shallow2d.o: shallow2d.c
-	$(CC) $(CFLAGS) -c $<
+shallow2d.o: shallow2d.cu
+	$(CC) $(CFLAGS) -c $< -pg
 
 stepper.o: stepper.c
-	$(CC) $(CFLAGS) -c $<
+	$(CC) $(CFLAGS) -c $< -pg
 
 # ===
 # Documentation

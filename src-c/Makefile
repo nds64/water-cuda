@@ -2,9 +2,14 @@ PLATFORM=gcc
 include ../config/Makefile.in.$(PLATFORM)
 CC=$(NVCC)
 CFLAGS=$(NVCCFLAGS)
-
 # ===
 # Main driver and sample run
+
+cpu: ldriver.o shallow2d-cpu.o stepper.o
+	$(CC) $(CFLAGS) $(LUA_CFLAGS) -o $@ $^ $(LUA_LIBS) $(LIBS) -pg
+
+gpu: ldriver.o shallow2d-gpu.o stepper.o
+	$(NVCC) $(NVCCFLAGS) $(LUA_CFLAGS) -o $@ $^ $(LUA_LIBS) $(LIBS) -pg
 
 lshallow: ldriver.o shallow2d.o stepper.o
 	$(CC) $(CFLAGS) $(LUA_CFLAGS) -o $@ $^ $(LUA_LIBS) $(LIBS) -pg
@@ -12,8 +17,11 @@ lshallow: ldriver.o shallow2d.o stepper.o
 ldriver.o: ldriver.c shallow2d.h
 	$(CC) $(CFLAGS) $(LUA_CFLAGS) -c $< -pg
 
-shallow2d.o: shallow2d.cu
-	$(CC) $(CFLAGS) -c $< -pg
+shallow2d-cpu.o: shallow2d.c
+	$(CC) $(CFLAGS) -c $< -o $@ -pg
+
+shallow2d-gpu.o: shallow2d.cu
+	$(NVCC) $(NVVCFLAGS) -c $< -o $@ -pg
 
 stepper.o: stepper.c
 	$(CC) $(CFLAGS) -c $< -pg

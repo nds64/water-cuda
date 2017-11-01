@@ -3,7 +3,7 @@
 #include <math.h>
 
 #define BLOCKS 512
-#define THREADS_PER_BLOCK 512
+#define THREADS_PER_BLOCK 1024 
 
 //ldoc on
 /**
@@ -122,8 +122,7 @@ void cuda_speed (float* cx,
   __shared__ float tempx[THREADS_PER_BLOCK];
   __shared__ float tempy[THREADS_PER_BLOCK];
   static const float g = 9.8;
-  int index = threadIdx.x + blockIdx.x * blockDim.x;
-  //int index = threadIdx.x;
+  int index = threadIdx.x;
 
   float hi = h[index];
   float inv_hi = 1.0f/h[index];
@@ -161,7 +160,7 @@ void shallow2d_speed(float* cxy, const float* U,
     cudaMemcpy( cuda_U, U, size, cudaMemcpyHostToDevice );
 
     //shallow2dv_speed(cxy, U, U+field_stride, U+2*field_stride, g, ncell);
-    cuda_speed<<<1, 1>>>(cx, cy, cuda_U, cuda_U+field_stride, cuda_U+2*field_stride);
+    cuda_speed<<<BLOCKS, THREADS_PER_BLOCK>>>(cx, cy, cuda_U, cuda_U+field_stride, cuda_U+2*field_stride);
     cudaMemcpy(&cxy[0], cx, sizeof(float),  cudaMemcpyDeviceToHost);
     cudaMemcpy(&cxy[1], cy, sizeof(float),  cudaMemcpyDeviceToHost);
 

@@ -1,9 +1,10 @@
+#include <stdio.h>
 #include <string.h>
 #include <math.h>
-//#include <cuda.h>
 
 #define BLOCKS 512
 #define THREADS_PER_BLOCK 512
+
 //ldoc on
 /**
  * ## Implementation
@@ -20,8 +21,8 @@
 extern "C" {
 #include "shallow2d.h"
 }
-static const float g = 9.8;
 
+static const float g = 9.8;
 
 static
 void shallow2dv_flux(float* __restrict__ fh,
@@ -47,64 +48,7 @@ void shallow2dv_flux(float* __restrict__ fh,
         ghv[i] = hvi*hvi*inv_h + (0.5f*g)*hi*hi;
     }
 }
-/**
- *  Compute the maximum of 2 single-precision floating point values using an atomic operation
- *
- * @param[in]	address	The address of the reference value which might get updated with the minimum
- * @param[in]	value	The value that is compared to the reference in order to determine the minimum
- */
-__device__ void AtomicMax(float * const address, const float value)
-{
-	if (* address >= value)
-	{
-		return;
-	}
 
-	int * const address_as_i = (int *)address;
-	int old = * address_as_i, assumed;
-
-	do 
-	{
-		assumed = old;
-		if (__int_as_float(assumed) >= value)
-		{
-			break;
-		}
-
-		old = atomicCAS(address_as_i, assumed, __float_as_int(value));
-	} while (assumed != old);
-}
-__global__ 
-void cuda_speed (float* cx,
-                      float* cy,
-                      const float* h,
-                      const float* hu,
-                      const float* hv,
-                      float g,
-                      int ncell)
-{
-    __shared__ int tempx[THREADS_PER_BLOCK];
-    __shared__ int tempy[THREADS_PER_BLOCK];
-    int index = threadIdx.x + blockIdx.x * blockDim.x;
-
-        float hi = h[index];
-        float inv_hi = 1.0f/h[index];
-        float root_gh = sqrtf(g * hi);
-        tempx[index] = fabsf(hu[index] * inv_hi) + root_gh;
-        tempy[index] = fabsf(hv[index] * inv_hi) + root_gh;
-
-__syncthreads();
-
-   if ( 0 == threadIdx.x ) {
-       float x, y = 0.0;
-       for (int i = 0 ; i < THREADS_PER_BLOCK; i++)  {
-           x = fmaxf(x, tempx[i]);
-           y = fmaxf(y, tempy[i]);
-       }
-       AtomicMax(cx, x);
-       AtomicMax(cy, y);
-   }
-}
 
 static
 void shallow2dv_speed(float* __restrict__ cxy,
@@ -129,7 +73,6 @@ void shallow2dv_speed(float* __restrict__ cxy,
     cxy[1] = cy;
 }
 
-
 void shallow2d_flux(float* FU, float* GU, const float* U,
                     int ncell, int field_stride)
 {
@@ -139,19 +82,90 @@ void shallow2d_flux(float* FU, float* GU, const float* U,
                     g, ncell);
 }
 
+/*
+void shallow2d_speed(float* cxy, const float* U,
+                     int ncell, int field_stride)
+{
+    shallow2dv_speed(cxy, U, U+field_stride, U+2*field_stride, g, ncell);
+}
+*/
+/**
+ *  Compute the maximum of 2 single-precision floating point values using an atomic operation
+ *
+ * @param[in]	address	The address of the reference value which might get updated with the minimum
+ * @param[in]	value	The value that is compared to the reference in order to determine the minimum
+ */
+
+__device__
+void AtomicMax(float * const address, const float value)
+{
+    if (* address >= value) { return; }
+
+    int * const address_as_i = (int *)address;
+    int old = * address_as_i, assumed;
+
+    do {
+        assumed = old;
+        if (__int_as_float(assumed) >= value) { break; }
+
+        old = atomicCAS(address_as_i, assumed, __float_as_int(value));
+        } while (assumed != old);
+}
+
+__global__
+void cuda_speed (float* cx,
+                 float* cy,
+                 const float* h,
+                 const float* hu,
+                 const float* hv)
+{
+  __shared__ float tempx[THREADS_PER_BLOCK];
+  __shared__ float tempy[THREADS_PER_BLOCK];
+  static const float g = 9.8;
+  int index = threadIdx.x + blockIdx.x * blockDim.x;
+  //int index = threadIdx.x;
+
+  float hi = h[index];
+  float inv_hi = 1.0f/h[index];
+  float root_gh = sqrtf(g * hi);
+  tempx[index] = fabsf(hu[index] * inv_hi) + root_gh;
+  tempy[index] = fabsf(hv[index] * inv_hi) + root_gh;
+
+  __syncthreads();
+
+  if ( 0 == threadIdx.x ) {
+    float x, y = 0.0;
+    for (int i = 0 ; i < THREADS_PER_BLOCK; i++)  {
+      x = fmaxf(x, tempx[i]);
+      y = fmaxf(y, tempy[i]);
+    }
+    // *cx = fmaxf(*cx,x);
+    // *cy = fmaxf(*cy,y);
+    AtomicMax(cx, x);
+    AtomicMax(cy, y);
+  }
+}
 
 void shallow2d_speed(float* cxy, const float* U,
                      int ncell, int field_stride)
 {
+    int size = 3 * ncell * sizeof(float);
     float *cuda_U, *cx, *cy;
-    cudaMalloc( (void**)&cuda_U, 3*ncell*sizeof(float));
-    cudaMalloc( (void**)&cx, sizeof(float));
-    cudaMalloc( (void**)&cy, sizeof(float));
+    
+    cudaMalloc( (void**)&cuda_U, size );
+    cudaMalloc( (void**)&cx, sizeof(float) );
+    cudaMalloc( (void**)&cy, sizeof(float) );
 
-    cudaMemcpy( cuda_U, U, 3*ncell*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy( cx, &cxy[0], sizeof(float), cudaMemcpyHostToDevice );
+    cudaMemcpy( cy, &cxy[1], sizeof(float), cudaMemcpyHostToDevice );
+    cudaMemcpy( cuda_U, U, size, cudaMemcpyHostToDevice );
 
     //shallow2dv_speed(cxy, U, U+field_stride, U+2*field_stride, g, ncell);
-    cuda_speed<<<BLOCKS, THREADS_PER_BLOCK>>>(cx, cy, U, U+field_stride, U+2*field_stride, g, ncell);
-    cudaMemcpy(cxy, cx, sizeof(float),  cudaMemcpyDeviceToHost);
-    cudaMemcpy(cxy+sizeof(float), cy, sizeof(float),  cudaMemcpyDeviceToHost);
+    cuda_speed<<<1, 1>>>(cx, cy, cuda_U, cuda_U+field_stride, cuda_U+2*field_stride);
+    cudaMemcpy(&cxy[0], cx, sizeof(float),  cudaMemcpyDeviceToHost);
+    cudaMemcpy(&cxy[1], cy, sizeof(float),  cudaMemcpyDeviceToHost);
+
+    cudaFree(cuda_U);
+    cudaFree(cx);
+    cudaFree(cy);
 }
